@@ -1,0 +1,57 @@
+*notebook-cells.txt*  Jupyter-style notebook editing for Neovim
+
+==============================================================================
+INTRODUCTION                                                  *notebook-cells*
+
+notebook-cells.nvim draws jupytext "percent" notebooks (`# %%` markers) as
+cells, adds Jupyter-style command/edit modes, starts a kernel from the
+notebook's own virtualenv and keeps `git diff` small when saving .ipynb files.
+
+It needs jupytext.nvim (to open .ipynb files) and molten-nvim (to run cells).
+Run `:checkhealth notebook_cells` to verify the setup.
+
+==============================================================================
+SETUP                                                  *notebook-cells.setup*
+
+>lua
+    require("notebook_cells").setup({})
+<
+See README.md or `lua/notebook_cells/config.lua` for every option.
+
+==============================================================================
+MODES                                                  *notebook-cells.modes*
+
+Command mode  A cell is selected (cursor on its header). `j`/`k` move between
+              cells, `a`/`b` add a cell above/below, `dd` deletes it, `m`
+              toggles code/markdown, `<CR>` or `i` enters edit mode.
+Edit mode     Normal Neovim inside the cell; `<Esc>` in normal mode returns to
+              command mode.
+
+==============================================================================
+MAPPINGS                                            *notebook-cells.mappings*
+
+All mappings are buffer-local and configurable through `keymaps`.
+
+  <leader>mc    run the current cell
+  <leader>mn    run the cell and go to the next one (also <S-CR>)
+  <leader>ma    new code cell below
+  <leader>mA    new markdown cell below
+  <leader>mi    start the project's kernel
+  <leader>mI    pick a kernel with molten's picker
+  ]c / [c       next / previous cell
+
+==============================================================================
+COMMANDS                                            *notebook-cells.commands*
+
+  :NotebookCellsRun         run the current cell
+  :NotebookCellsRunNext     run the current cell and go to the next
+  :NotebookCellsKernel      start the project's kernel
+
+==============================================================================
+HIGHLIGHTS                                        *notebook-cells.highlights*
+
+  NotebookCellsCodeBody  NotebookCellsMarkdownBody  NotebookCellsIdle
+  NotebookCellsIdleMarkdown  NotebookCellsActive  NotebookCellsActiveMarkdown
+  NotebookCellsEdit  NotebookCellsCodeLabel  NotebookCellsMarkdownLabel
+
+vim:tw=78:ts=8:ft=help:norl:
