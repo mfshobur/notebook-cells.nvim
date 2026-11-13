@@ -18,6 +18,7 @@ function M.setup(opts)
   local o = config.setup(opts)
 
   ui.setup_highlights()
+  require("notebook_cells.kernel").setup()
   local group = vim.api.nvim_create_augroup("NotebookCells", { clear = true })
   local patterns = o.patterns
 
@@ -31,6 +32,8 @@ function M.setup(opts)
       ui.apply_window_options(0)
       if state.mode[a.buf] == nil then
         state.mode[a.buf] = o.modal and "command" or "edit"
+        local was_modified = vim.bo[a.buf].modified
+        if actions.ensure_cell(a.buf) then vim.bo[a.buf].modified = was_modified end
         local cs = cells.parse(a.buf)
         if o.modal and cs[1] then vim.api.nvim_win_set_cursor(0, { cs[1].s, 0 }) end
       end
@@ -73,7 +76,7 @@ function M.setup(opts)
       local row = vim.api.nvim_win_get_cursor(0)[1]
       -- hidden front matter: never leave the cursor inside it
       if o.hide_header and vim.fn.has("nvim-0.11") == 1 and cs[1] then
-        local _, h2 = cells.header_range(lines)
+        local _, h2 = cells.hidden_range(lines)
         if h2 and row <= h2 then
           row = cs[1].s
           vim.api.nvim_win_set_cursor(0, { row, 0 })
@@ -112,20 +115,57 @@ function M.setup(opts)
     vim.api.nvim_create_autocmd("BufWritePost", {
       group = group,
       pattern = patterns,
-      callback = function(a) md.minimise(a.file) end,
+      callback = function(a)
+        md.minimise(a.file)
+        require("notebook_cells.outputs").after_write(a.buf, a.file)
+      end,
     })
   end
 
-  vim.api.nvim_create_user_command("NotebookCellsRun", function() actions.run_cell(false) end, {})
-  vim.api.nvim_create_user_command("NotebookCellsRunNext", function() actions.run_cell(true) end, {})
-  vim.api.nvim_create_user_command("NotebookCellsKernel", function() require("notebook_cells.kernel").start() end, {})
+  local commands = {
+    NotebookCellsRun = function() actions.run_cell(false) end,
+    NotebookCellsRunNext = function() actions.run_cell(true) end,
+    NotebookCellsRunAll = function() actions.run_all() end,
+    NotebookCellsRunAbove = function() actions.run_above() end,
+    NotebookCellsRunBelow = function() actions.run_below() end,
+    NotebookCellsInterrupt = function() actions.interrupt() end,
+    NotebookCellsRestart = function(c) actions.restart(c.bang) end,
+    NotebookCellsRestartRunAll = function(c) actions.restart_and_run_all(c.bang) end,
+    NotebookCellsClearOutput = function() actions.clear_cell_output() end,
+    NotebookCellsClearAllOutputs = function() actions.clear_all_outputs() end,
+    NotebookCellsSaveOutputs = function() require("notebook_cells.outputs").save() end,
+    NotebookCellsLoadOutputs = function() require("notebook_cells.outputs").load() end,
+    NotebookCellsKernel = function() require("notebook_cells.kernel").start() end,
+    NotebookCellsSelectKernel = function() require("notebook_cells.kernel").select() end,
+  }
+  for name, fn in pairs(commands) do
+    vim.api.nvim_create_user_command(name, fn, { bang = name:find("Restart") ~= nil })
+  end
 end
 
 -- Lua API -------------------------------------------------------------------
-function M.run_cell(advance) require("notebook_cells.actions").run_cell(advance) end
-function M.goto_cell(dir) require("notebook_cells.actions").goto_cell(dir) end
-function M.new_cell(markdown) require("notebook_cells.actions").new_cell(markdown) end
-function M.start_kernel(cb) require("notebook_cells.kernel").start(cb) end
-function M.render(buf) require("notebook_cells.ui").render(buf) end
+local function lazy(mod, fn)
+  return function(...) return require("notebook_cells." .. mod)[fn](...) end
+end
+M.run_cell = lazy("actions", "run_cell")
+M.run_all = lazy("actions", "run_all")
+M.run_above = lazy("actions", "run_above")
+M.run_below = lazy("actions", "run_below")
+M.interrupt = lazy("actions", "interrupt")
+M.restart = lazy("actions", "restart")
+M.restart_and_run_all = lazy("actions", "restart_and_run_all")
+M.clear_cell_output = lazy("actions", "clear_cell_output")
+M.clear_all_outputs = lazy("actions", "clear_all_outputs")
+M.goto_cell = lazy("actions", "goto_cell")
+M.new_cell = lazy("actions", "new_cell")
+M.move_cell = lazy("actions", "move_cell")
+M.merge_below = lazy("actions", "merge_below")
+M.split_cell = lazy("actions", "split_cell")
+M.start_kernel = lazy("kernel", "start")
+M.select_kernel = lazy("kernel", "select")
+M.status = lazy("kernel", "status")
+M.save_outputs = lazy("outputs", "save")
+M.load_outputs = lazy("outputs", "load")
+M.render = lazy("ui", "render")
 
 return M

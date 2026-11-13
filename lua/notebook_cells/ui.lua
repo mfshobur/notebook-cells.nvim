@@ -5,6 +5,9 @@ local state = require("notebook_cells.state")
 
 local M = {}
 local ns = vim.api.nvim_create_namespace("notebook_cells")
+-- Molten draws outputs as virtual lines on the same line; an explicit priority keeps
+-- the footer in a fixed place relative to them.
+local FOOTER_PRIORITY = 65535
 M.ns = ns
 
 -- ── highlights ────────────────────────────────────────────────────────────
@@ -77,9 +80,11 @@ function M.render(buf)
   local act = cells_mod.cell_at(cells, row)
   state.active[buf] = act
 
+  vim.b[buf].notebook_cells_hidden = 0
   if o.hide_header and vim.fn.has("nvim-0.11") == 1 then
-    local h1, h2 = cells_mod.header_range(lines)
+    local h1, h2 = cells_mod.hidden_range(lines)
     if h1 then
+      vim.b[buf].notebook_cells_hidden = h2
       for r = h1, h2 do
         vim.api.nvim_buf_set_extmark(buf, ns, r - 1, 0, { conceal_lines = "" })
       end
@@ -124,15 +129,43 @@ function M.render(buf)
     end
 
     -- footer: ╰──────
-    vim.api.nvim_buf_set_extmark(buf, ns, c.e - 1, 0, {
-      virt_lines = { { { o.border.bottom .. o.border.rule:rep(math.max(0, w - vim.fn.strdisplaywidth(o.border.bottom))), group } } },
-    })
+    -- Molten hangs its output (virtual lines) below the cell's last line. Drawing the
+    -- footer "above" the following line puts it after that output every time; the very
+    -- last line of the buffer has no following line, so it falls back to a line below.
+    local footer = { { o.border.bottom .. o.border.rule:rep(math.max(0, w - vim.fn.strdisplaywidth(o.border.bottom))), group } }
+    if c.e < #lines then
+      vim.api.nvim_buf_set_extmark(buf, ns, c.e, 0, { virt_lines = { footer }, virt_lines_above = true })
+    else
+      vim.api.nvim_buf_set_extmark(buf, ns, c.e - 1, 0, { priority = FOOTER_PRIORITY, virt_lines = { footer } })
+    end
   end
 end
 
 -- ── window options (saved on enter, restored on leave) ────────────────────
 
-local WO = { conceallevel = 2, concealcursor = "nvic", signcolumn = "yes", cursorline = false }
+local WO = {
+  conceallevel = 2,
+  concealcursor = "nvic",
+  signcolumn = "yes",
+  cursorline = false,
+  statuscolumn = "%!v:lua.require'notebook_cells.ui'.statuscolumn()",
+}
+
+---Line numbers that do not count the hidden front matter.
+function M.statuscolumn()
+  local win = vim.g.statusline_winid
+  if not win or not vim.api.nvim_win_is_valid(win) then return "%s%=%l " end
+  if vim.v.virtnum ~= 0 then return "%s%=" end
+  local buf = vim.api.nvim_win_get_buf(win)
+  local hidden = vim.b[buf].notebook_cells_hidden or 0
+  local n
+  if vim.wo[win].relativenumber and vim.v.relnum > 0 then
+    n = vim.v.relnum
+  else
+    n = vim.v.lnum - hidden
+  end
+  return "%s%=" .. n .. " "
+end
 
 function M.apply_window_options(win)
   win = (win == nil or win == 0) and vim.api.nvim_get_current_win() or win

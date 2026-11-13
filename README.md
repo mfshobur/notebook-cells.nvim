@@ -2,6 +2,8 @@
 
 A Neovim plugin for editing `.ipynb` files. It draws each cell as a box, lets you move between cells with `j` and `k` like in Jupyter, and starts the kernel from the notebook's own virtualenv.
 
+![Demo](assets/demo.gif)
+
 When a cell is selected (command mode), `j` and `k` move between cells. The selected cell has a blue border:
 
 ![Command mode](assets/command-mode.png)
@@ -21,12 +23,60 @@ It builds on two other plugins and does not replace them:
 ## What it does
 
 - Draws each cell with a header (`╭─ [1] Python ───`), a bar on the left, a footer and a slightly different background. Markdown cells get another tint and the leading `# ` is hidden. The colors come from your colorscheme.
-- Hides the `# ---` YAML block that jupytext puts at the top of the file. This needs Neovim 0.11. The block is still saved.
-- Highlights the cell under the cursor.
-- Has two modes. In command mode, `j`/`k` move between cells, `a`/`b` add a cell above or below, `dd` deletes the cell, `m` switches it between code and markdown, and `Enter` or `i` starts editing. In edit mode, Neovim behaves as usual. The `# %%` line can't be edited by accident.
-- Runs a cell with `<leader>mc`. `<leader>mn` (or `Shift+Enter`) runs it and moves to the next cell.
+- Hides the `# ---` YAML block that jupytext puts at the top of the file, and numbers the lines from 1. This needs Neovim 0.11. The block is still saved.
+- Has two modes, like Jupyter. In command mode a cell is selected and the keys act on cells. In edit mode you are inside the cell and Neovim works as usual.
+- Runs cells on a Jupyter kernel through molten-nvim: run the cell, run and advance, run and insert a new cell, run all, run above, run below.
+- Controls the kernel: interrupt, restart, restart and run all, restart and clear outputs, select a different kernel.
+- Clears the output of one cell or of all cells. Clearing all outputs is also written to the file the next time you save, so you can clear before a commit.
+- Edits the structure: add, delete, cut, copy and paste cells, move a cell up or down, merge with the cell below, split at the cursor, change a cell between code and markdown. Moving a cell keeps its output.
 - Finds the nearest `.venv` above the notebook, registers it as a Jupyter kernel and starts it. If there is no venv, it opens molten's kernel picker.
-- Restores unchanged cells after saving. jupytext rewrites the whole file on save (trailing newlines, metadata and so on), which makes noisy diffs. After each save this plugin puts every cell you didn't touch back exactly as it was, so `git diff` only shows the cells you changed. Outputs are kept.
+- Restores unchanged cells after saving. jupytext rewrites the whole file on save (trailing newlines, metadata and so on), which makes noisy diffs. After each save this plugin puts every cell you didn't touch back exactly as it was, so `git diff` only shows the cells you changed.
+- Can keep outputs in the `.ipynb`: write them on save and show them again when the kernel starts. Both are off by default.
+
+## Keys
+
+All keys are buffer-local and only exist in notebook buffers. `<leader>` is whatever you use as leader (space in LazyVim).
+
+Command mode (a cell is selected). In edit mode these keys keep their normal Vim meaning.
+
+| Key | Action |
+|---|---|
+| `j` / `k` | next / previous cell |
+| `Enter` or `i` | edit the cell |
+| `a` / `b` | add a cell above / below |
+| `dd` | delete the cell (it is kept for pasting) |
+| `x` / `c` | cut / copy the cell |
+| `v` / `V` | paste below / above |
+| `M` | merge with the cell below |
+| `m` / `y` | change the cell to markdown / code |
+| `u` | undo (this is Neovim's normal undo) |
+
+In both modes:
+
+| Key | Action |
+|---|---|
+| `Esc` (edit mode) | back to command mode |
+| `]c` / `[c` | next / previous cell |
+| `<leader>mc`, `Ctrl+Enter` | run cell |
+| `<leader>mn`, `Shift+Enter` | run cell and go to the next one (adds a cell after the last) |
+| `<leader>mO`, `Alt+Enter` | run cell and insert a new one below |
+| `<leader>mR` | run all cells |
+| `<leader>mU` | run all cells above |
+| `<leader>mB` | run this cell and all below |
+| `<leader>mx` | interrupt the kernel |
+| `<leader>mK` | restart the kernel |
+| `<leader>mZ` | restart the kernel and run all cells |
+| `<leader>mC` | clear this cell's output |
+| `<leader>mX` | clear all outputs |
+| `<leader>m[` / `<leader>m]` | move the cell up / down |
+| `<leader>ms` | split the cell at the cursor |
+| `<leader>ma` / `<leader>mA` | new code / markdown cell below, ready to type in |
+| `<leader>mi` | start the project's kernel |
+| `<leader>mI` | select a different kernel |
+
+`Ctrl+Enter`, `Shift+Enter` and `Alt+Enter` only work if your terminal sends them as separate keys. If one does nothing, use the `<leader>` version. Every key can be changed or turned off, see Configuration.
+
+Every action is also a command: `:NotebookCellsRun`, `:NotebookCellsRunNext`, `:NotebookCellsRunAll`, `:NotebookCellsRunAbove`, `:NotebookCellsRunBelow`, `:NotebookCellsInterrupt`, `:NotebookCellsRestart[!]`, `:NotebookCellsRestartRunAll[!]`, `:NotebookCellsClearOutput`, `:NotebookCellsClearAllOutputs`, `:NotebookCellsKernel`, `:NotebookCellsSelectKernel`, `:NotebookCellsSaveOutputs`, `:NotebookCellsLoadOutputs`. The `!` on the restart commands also clears the outputs.
 
 ## Requirements
 
@@ -57,7 +107,9 @@ With lazy.nvim:
       version = "^1.0.0",
       build = ":UpdateRemotePlugins",
       init = function()
-        vim.g.molten_auto_open_output = true
+        -- Show output inline under the cell only. With auto_open_output molten also
+        -- opens a floating window over the cell.
+        vim.g.molten_auto_open_output = false
         vim.g.molten_virt_text_output = true
         -- For inline plots, use image.nvim and a terminal that supports the kitty graphics protocol:
         -- vim.g.molten_image_provider = "image.nvim"
@@ -90,13 +142,20 @@ require("notebook_cells").setup({
     next_cell = "j", prev_cell = "k",
     edit = { "<CR>", "i" },
     add_above = "a", add_below = "b",
-    delete_cell = "dd", toggle_markdown = "m",
+    delete_cell = "dd", cut_cell = "x", copy_cell = "c",
+    paste_below = "v", paste_above = "V",
+    merge_below = "M", to_markdown = "m", to_code = "y",
     -- switching modes
     exit_edit = "<Esc>", click_to_edit = "<LeftMouse>",
     -- both modes
     jump_next = "]c", jump_prev = "[c",
-    run_cell = "<leader>mc",
+    run_cell = { "<leader>mc", "<C-CR>" },
     run_and_next = { "<leader>mn", "<S-CR>" },
+    run_and_insert = { "<leader>mO", "<A-CR>" },
+    run_all = "<leader>mR", run_above = "<leader>mU", run_below = "<leader>mB",
+    interrupt = "<leader>mx", restart = "<leader>mK", restart_and_run_all = "<leader>mZ",
+    clear_cell_output = "<leader>mC", clear_all_outputs = "<leader>mX",
+    move_up = "<leader>m[", move_down = "<leader>m]", split_cell = "<leader>ms",
     new_code_below = "<leader>ma", new_markdown_below = "<leader>mA",
     start_kernel = "<leader>mi", pick_kernel = "<leader>mI",
   },
@@ -108,6 +167,11 @@ require("notebook_cells").setup({
     install_ipykernel = "ask",    -- "ask", true or false
     fallback_picker = true,       -- open molten's picker if no venv is found
     startup_timeout = 10000,      -- milliseconds
+  },
+
+  outputs = {
+    save_on_write = false,        -- write molten's outputs into the .ipynb after each save
+    load_on_start = false,        -- show the outputs stored in the file when the kernel starts
   },
 
   minimal_diff = {
@@ -123,18 +187,45 @@ require("notebook_cells").setup({
 
 They are rebuilt from your colorscheme every time it changes. To change one, use the `highlights` option.
 
-### Lua functions and commands
+### Lua functions
 
 ```lua
 local nb = require("notebook_cells")
-nb.run_cell(false)   -- run the current cell
-nb.run_cell(true)    -- run it, then go to the next cell
-nb.goto_cell(1)      -- next cell (-1 for the previous one)
-nb.new_cell(false)   -- new code cell below (true for markdown)
-nb.start_kernel()    -- start the project's kernel
+nb.run_cell(false)        -- run the current cell
+nb.run_cell(true)         -- run it, then go to the next cell
+nb.run_all()              -- also run_above(), run_below()
+nb.interrupt()
+nb.restart(false)         -- true also clears outputs
+nb.restart_and_run_all()
+nb.clear_cell_output()
+nb.clear_all_outputs()
+nb.goto_cell(1)           -- next cell (-1 for the previous one)
+nb.new_cell(false)        -- new code cell below (true for markdown)
+nb.move_cell(-1)          -- up (1 for down)
+nb.merge_below()
+nb.split_cell()
+nb.start_kernel()
+nb.select_kernel()
+nb.save_outputs()
+nb.load_outputs()
+nb.status()               -- "● name" when a kernel is ready, "○ name" while starting, "" if none
 ```
 
-Commands: `:NotebookCellsRun`, `:NotebookCellsRunNext`, `:NotebookCellsKernel`
+`nb.status()` is meant for a statusline, for example in lualine:
+`{ function() return require("notebook_cells").status() end }`.
+
+## Outputs in the file
+
+By default outputs only live in Neovim (molten shows them under the cell) and the `.ipynb` is left alone, so your diffs stay small. Two options change that:
+
+- `outputs.save_on_write = true` writes molten's outputs for the cells you ran into the notebook after each save. Cells you did not run keep the outputs already in the file.
+- `outputs.load_on_start = true` shows the outputs stored in the file, marked `[OLD]`, when the kernel starts. Molten can only do this once a kernel is running, so the outputs don't appear before that.
+
+You can also call `:NotebookCellsSaveOutputs` and `:NotebookCellsLoadOutputs` by hand.
+
+Clearing is separate from this. After `<leader>mX` the next save removes all outputs from the file, whatever `save_on_write` is set to. If you run cells again before saving and `save_on_write` is on, the new outputs are written.
+
+molten exports `print` output as `display_data` instead of `stream`. That is valid notebook JSON and other tools show it fine, but it is not byte-for-byte what Jupyter writes.
 
 ## How the kernel is chosen
 
@@ -148,6 +239,9 @@ If a kernel is already running for the buffer, that one is used. Pressing the ru
 ## Limitations
 
 - Only jupytext's percent format is supported (`# %%` and `# %% [markdown]`).
+- Run all does not stop at the first error. The kernel refuses to run the cells after a failing one, but molten shows those cells as `Out[...]: ✓ Done` with no output.
+- Execution counts and output boxes come from molten, so they look like molten's (`Out[3]: ✓ Done 0.0s`), not like Jupyter's `[3]` in the margin.
+- Undo is Neovim's normal undo. One `u` undoes a whole cell operation such as a paste or a merge.
 - The cells are drawn with extmarks, so there are no buttons or toolbars on them.
 - Kernel detection looks for `venv`-style folders, including ones made by uv. It does not know about poetry or conda environments.
 - The save helper compares against a copy of the file taken when you opened it. If another program changes the notebook while it is open in Neovim, close and reopen it before saving, or those changes can be overwritten.

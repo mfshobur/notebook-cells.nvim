@@ -29,22 +29,40 @@ M.defaults = {
   -- Buffer-local keymaps. Use `false` to disable one, or `keymaps = false`
   -- to disable all of them and call the Lua API yourself.
   keymaps = {
-    -- command mode
+    -- command mode (act on cells; in edit mode these keys keep their normal Vim meaning)
     next_cell = "j",
     prev_cell = "k",
     edit = { "<CR>", "i" },
     add_above = "a",
     add_below = "b",
     delete_cell = "dd",
-    toggle_markdown = "m",
+    cut_cell = "x",
+    copy_cell = "c",
+    paste_below = "v",
+    paste_above = "V",
+    merge_below = "M",
+    to_markdown = "m",
+    to_code = "y",
     -- mode switching (modal = true)
     exit_edit = "<Esc>",
     click_to_edit = "<LeftMouse>",
     -- always available
     jump_next = "]c",
     jump_prev = "[c",
-    run_cell = "<leader>mc",
+    run_cell = { "<leader>mc", "<C-CR>" },
     run_and_next = { "<leader>mn", "<S-CR>" },
+    run_and_insert = { "<leader>mO", "<A-CR>" },
+    run_all = "<leader>mR",
+    run_above = "<leader>mU",
+    run_below = "<leader>mB",
+    interrupt = "<leader>mx",
+    restart = "<leader>mK",
+    restart_and_run_all = "<leader>mZ",
+    clear_cell_output = "<leader>mC",
+    clear_all_outputs = "<leader>mX",
+    move_up = "<leader>m[",
+    move_down = "<leader>m]",
+    split_cell = "<leader>ms",
     new_code_below = "<leader>ma",
     new_markdown_below = "<leader>mA",
     start_kernel = "<leader>mi",
@@ -64,6 +82,14 @@ M.defaults = {
     fallback_picker = true,
     -- How long to wait for the kernel to come up (ms).
     startup_timeout = 10000,
+  },
+
+  -- Keeping cell outputs in the .ipynb file. Off by default.
+  outputs = {
+    -- After each save, write molten's outputs of the executed cells into the file.
+    save_on_write = false,
+    -- When the kernel first becomes ready, show the outputs stored in the file.
+    load_on_start = false,
   },
 
   -- Keep `git diff` small: after each save, restore every unchanged cell

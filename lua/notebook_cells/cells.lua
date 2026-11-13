@@ -36,6 +36,14 @@ function M.header_range(lines)
   return nil
 end
 
+---Lines hidden at the top of the buffer: the front matter plus the blank lines after it.
+function M.hidden_range(lines)
+  local h1, h2 = M.header_range(lines)
+  if not h1 or h2 >= #lines then return nil end
+  while lines[h2 + 1] and lines[h2 + 1]:match("^%s*$") and h2 + 1 < #lines do h2 = h2 + 1 end
+  return h1, h2
+end
+
 ---Index of the cell containing `row` (1-based), or nil before the first cell.
 function M.cell_at(cells, row)
   local found

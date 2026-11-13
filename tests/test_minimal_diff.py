@@ -57,5 +57,19 @@ class MinimalDiff(unittest.TestCase):
         self.assertEqual(out["metadata"], original["metadata"])
 
 
+class ClearOutputs(unittest.TestCase):
+    def test_outputs_and_counts_removed_but_style_kept(self):
+        notebook = nb([cell(["a = 1\n"], [{"output_type": "stream", "name": "stdout", "text": ["1\n"]}]), cell(["b = 2\n"])])
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d, "n.ipynb")
+            path.write_text(json.dumps(notebook, indent=1) + "\n")
+            subprocess.run([sys.executable, str(SCRIPT), "--clear-outputs", str(path)], check=True)
+            text = path.read_text()
+        out = json.loads(text)
+        self.assertTrue(all(c["outputs"] == [] and c["execution_count"] is None for c in out["cells"]))
+        self.assertTrue(text.endswith("\n"))
+        self.assertEqual([c["source"] for c in out["cells"]], [c["source"] for c in notebook["cells"]])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -11,10 +11,45 @@ local function sys(cmd, cb)
   vim.system(cmd, { text = true }, function(r) vim.schedule(function() cb(r) end) end)
 end
 
----Is a molten kernel attached to the current buffer?
-function M.is_running()
-  local ok, kernels = pcall(vim.fn.MoltenRunningKernels, true)
-  return ok and type(kernels) == "table" and #kernels > 0
+local ready = {} -- kernel id -> true once molten reported MoltenKernelReady
+
+---Ids of the molten kernels attached to `buf` (default: current buffer).
+function M.attached(buf)
+  buf = (buf == nil or buf == 0) and vim.api.nvim_get_current_buf() or buf
+  local ok, ids = pcall(vim.api.nvim_buf_call, buf, function() return vim.fn.MoltenRunningKernels(true) end)
+  return (ok and type(ids) == "table") and ids or {}
+end
+
+---Is a molten kernel attached to the buffer (it may still be starting)?
+function M.is_running(buf) return #M.attached(buf) > 0 end
+
+---Is an attached kernel up and able to execute code?
+function M.is_ready(buf)
+  for _, id in ipairs(M.attached(buf)) do
+    if ready[id] then return true end
+  end
+  return false
+end
+
+---Track molten's lifecycle events. Called from setup().
+function M.setup()
+  local group = vim.api.nvim_create_augroup("NotebookCellsKernel", { clear = true })
+  vim.api.nvim_create_autocmd("User", {
+    group = group,
+    pattern = "MoltenKernelReady",
+    callback = function(a)
+      local id = a.data and a.data.kernel_id
+      if id then ready[id] = true end
+    end,
+  })
+  -- a (re)initialised kernel with a reused id is not ready yet
+  vim.api.nvim_create_autocmd("User", {
+    group = group,
+    pattern = "MoltenInitPost",
+    callback = function()
+      for _, id in ipairs(M.attached(0)) do ready[id] = nil end
+    end,
+  })
 end
 
 local function venv_python(venv)
@@ -98,12 +133,35 @@ function M.ensure(buf, cb)
   probe(false)
 end
 
----Start the project's kernel (or molten's picker if there is no venv), then call cb.
+---Wait (polling) until the buffer's kernel is ready, then call cb.
+local function wait_ready(buf, cb)
+  local interval = 100
+  local function poll(left)
+    if M.is_ready(buf) then
+      state.starting[buf] = nil
+      if config.options.outputs.load_on_start and not vim.b[buf].notebook_cells_loaded then
+        vim.b[buf].notebook_cells_loaded = true
+        require("notebook_cells.outputs").load(buf)
+      end
+      if cb then cb() end
+    elseif left > 0 then
+      vim.defer_fn(function() poll(left - 1) end, interval)
+    else
+      state.starting[buf] = nil
+      notify("kernel did not become ready in time", vim.log.levels.WARN)
+    end
+  end
+  poll(math.ceil(config.options.kernel.startup_timeout / interval))
+end
+
+---Make sure a kernel is attached and ready (starting the project's kernel, or
+---molten's picker when there is no venv), then call cb.
 function M.start(cb)
   local buf = vim.api.nvim_get_current_buf()
-  if M.is_running() then return cb and cb() end
+  if M.is_ready(buf) then return cb and cb() end
   if state.starting[buf] then return notify("kernel is already starting, please wait...") end
   state.starting[buf] = true
+  if M.is_running(buf) then return wait_ready(buf, cb) end
 
   M.ensure(buf, function(name)
     if not name then
@@ -116,23 +174,59 @@ function M.start(cb)
     end
     notify("starting kernel '" .. name .. "'...")
     vim.cmd("MoltenInit " .. name)
-    local interval = 200
-    local function poll(left)
-      if M.is_running() then
-        state.starting[buf] = nil
-        if cb then cb() end
-      elseif left > 0 then
-        vim.defer_fn(function() poll(left - 1) end, interval)
-      else
-        state.starting[buf] = nil
-        notify("kernel did not start in time", vim.log.levels.WARN)
-      end
-    end
-    poll(math.ceil(config.options.kernel.startup_timeout / interval))
+    wait_ready(buf, cb)
   end)
 end
 
----Always show molten's own kernel picker.
-function M.pick() vim.cmd("MoltenInit") end
+M.ensure_ready = M.start
+
+---Interrupt the running execution.
+function M.interrupt(buf)
+  local ids = M.attached(buf)
+  if #ids == 0 then return notify("no kernel is running for this notebook", vim.log.levels.WARN) end
+  vim.cmd("MoltenInterrupt " .. ids[1])
+  notify("interrupted")
+end
+
+---Restart the kernel. With clear = true the outputs are removed too.
+---Calls cb once the new kernel is ready.
+function M.restart(clear, cb)
+  local buf = vim.api.nvim_get_current_buf()
+  local ids = M.attached(buf)
+  if #ids == 0 then return M.start(cb) end
+  ready[ids[1]] = nil
+  vim.cmd("MoltenRestart" .. (clear and "!" or "") .. " " .. ids[1])
+  notify("restarting kernel...")
+  state.starting[buf] = true
+  wait_ready(buf, cb)
+end
+
+---Pick any installed kernel and attach it to the notebook (replacing the current one).
+function M.select()
+  local buf = vim.api.nvim_get_current_buf()
+  local ok, available = pcall(vim.fn.MoltenAvailableKernels)
+  if not ok or type(available) ~= "table" or #available == 0 then
+    return notify("no Jupyter kernels found", vim.log.levels.WARN)
+  end
+  vim.ui.select(available, { prompt = "Select kernel" }, function(choice)
+    if not choice then return end
+    local ids = M.attached(buf)
+    if #ids > 0 then pcall(vim.cmd, "MoltenDeinit " .. ids[1]) end
+    state.starting[buf] = true
+    vim.cmd("MoltenInit " .. choice)
+    wait_ready(buf, nil)
+  end)
+end
+
+M.pick = M.select
+
+---Short kernel description for a statusline, e.g. "● play" (ready) or "○ play" (starting).
+---Empty when no kernel is attached.
+function M.status(buf)
+  local ids = M.attached(buf)
+  if #ids == 0 then return "" end
+  local name = ids[1]:gsub("^venv%-", ""):gsub("%-%x%x%x%x%x%x$", "")
+  return (M.is_ready(buf) and "● " or "○ ") .. name
+end
 
 return M

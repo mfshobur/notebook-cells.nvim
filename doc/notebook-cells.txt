@@ -4,8 +4,9 @@
 INTRODUCTION                                                  *notebook-cells*
 
 notebook-cells.nvim draws jupytext "percent" notebooks (`# %%` markers) as
-cells, adds Jupyter-style command/edit modes, starts a kernel from the
-notebook's own virtualenv and keeps `git diff` small when saving .ipynb files.
+cells, adds Jupyter's command/edit modes, runs cells through molten-nvim,
+starts a kernel from the notebook's own virtualenv and keeps `git diff` small
+when saving .ipynb files.
 
 It needs jupytext.nvim (to open .ipynb files) and molten-nvim (to run cells).
 Run `:checkhealth notebook_cells` to verify the setup.
@@ -21,31 +22,79 @@ See README.md or `lua/notebook_cells/config.lua` for every option.
 ==============================================================================
 MODES                                                  *notebook-cells.modes*
 
-Command mode  A cell is selected (cursor on its header). `j`/`k` move between
-              cells, `a`/`b` add a cell above/below, `dd` deletes it, `m`
-              toggles code/markdown, `<CR>` or `i` enters edit mode.
-Edit mode     Normal Neovim inside the cell; `<Esc>` in normal mode returns to
-              command mode.
+Command mode  A cell is selected (cursor on its header, blue border). The keys
+              below act on cells.
+Edit mode     You are inside the cell (green border). Neovim works as usual.
+              `<Esc>` in normal mode returns to command mode.
+
+Command mode keys (in edit mode they keep their normal meaning):
+
+  j / k         next / previous cell
+  <CR> / i      edit the cell
+  a / b         add a cell above / below
+  dd            delete the cell
+  x / c         cut / copy the cell
+  v / V         paste below / above
+  M             merge with the cell below
+  m / y         change the cell to markdown / code
 
 ==============================================================================
 MAPPINGS                                            *notebook-cells.mappings*
 
-All mappings are buffer-local and configurable through `keymaps`.
+Available in both modes. All mappings are buffer-local and configurable
+through `keymaps`.
 
-  <leader>mc    run the current cell
-  <leader>mn    run the cell and go to the next one (also <S-CR>)
+  <leader>mc    run the cell                     (also <C-CR>)
+  <leader>mn    run the cell and go to the next  (also <S-CR>)
+  <leader>mO    run the cell, insert one below   (also <A-CR>)
+  <leader>mR    run all cells
+  <leader>mU    run all cells above
+  <leader>mB    run this cell and all below
+  <leader>mx    interrupt the kernel
+  <leader>mK    restart the kernel
+  <leader>mZ    restart the kernel and run all cells
+  <leader>mC    clear this cell's output
+  <leader>mX    clear all outputs
+  <leader>m[    move the cell up
+  <leader>m]    move the cell down
+  <leader>ms    split the cell at the cursor
   <leader>ma    new code cell below
   <leader>mA    new markdown cell below
   <leader>mi    start the project's kernel
-  <leader>mI    pick a kernel with molten's picker
+  <leader>mI    select a different kernel
   ]c / [c       next / previous cell
 
 ==============================================================================
 COMMANDS                                            *notebook-cells.commands*
 
-  :NotebookCellsRun         run the current cell
-  :NotebookCellsRunNext     run the current cell and go to the next
-  :NotebookCellsKernel      start the project's kernel
+  :NotebookCellsRun                 run the current cell
+  :NotebookCellsRunNext             run it and go to the next cell
+  :NotebookCellsRunAll              run all cells
+  :NotebookCellsRunAbove            run all cells above
+  :NotebookCellsRunBelow            run this cell and all below
+  :NotebookCellsInterrupt           interrupt the kernel
+  :NotebookCellsRestart[!]          restart the kernel (! also clears outputs)
+  :NotebookCellsRestartRunAll[!]    restart and run all cells
+  :NotebookCellsClearOutput         clear this cell's output
+  :NotebookCellsClearAllOutputs     clear all outputs
+  :NotebookCellsKernel              start the project's kernel
+  :NotebookCellsSelectKernel        select a different kernel
+  :NotebookCellsSaveOutputs         write outputs into the .ipynb
+  :NotebookCellsLoadOutputs         show the outputs stored in the .ipynb
+
+==============================================================================
+OUTPUTS                                              *notebook-cells.outputs*
+
+Outputs stay in Neovim unless you enable `outputs.save_on_write` (write them
+into the file after each save) or `outputs.load_on_start` (show the stored
+outputs when the kernel starts). `<leader>mX` removes all outputs from the
+file on the next save.
+
+==============================================================================
+STATUSLINE                                          *notebook-cells.statusline*
+
+`require("notebook_cells").status()` returns "● name" when the kernel is
+ready, "○ name" while it starts and "" when there is none.
 
 ==============================================================================
 HIGHLIGHTS                                        *notebook-cells.highlights*

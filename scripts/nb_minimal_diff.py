@@ -2,6 +2,7 @@
 """Minimise .ipynb diffs after a jupytext round trip.
 
 usage: nb_minimal_diff.py ORIGINAL.ipynb WRITTEN.ipynb
+       nb_minimal_diff.py --clear-outputs NOTEBOOK.ipynb
 
 Cells in WRITTEN whose type and source match a cell in ORIGINAL are replaced by
 the original cell object (keeps formatting, ids, outputs, metadata). Changed or
@@ -73,5 +74,23 @@ def main(orig_path, new_path):
         f.write(text)
 
 
+def clear_outputs(path):
+    """Remove every output and execution count, keeping the file's JSON style."""
+    text = open(path, encoding="utf-8").read()
+    nb = json.loads(text)
+    for c in nb.get("cells", []):
+        if c.get("cell_type") == "code":
+            c["outputs"] = []
+            c["execution_count"] = None
+    out = json.dumps(nb, indent=detect_indent(text), ensure_ascii=False)
+    if text.endswith("\n"):
+        out += "\n"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(out)
+
+
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    if sys.argv[1] == "--clear-outputs":
+        clear_outputs(sys.argv[2])
+    else:
+        main(sys.argv[1], sys.argv[2])
