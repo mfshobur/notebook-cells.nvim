@@ -17,6 +17,8 @@ function M.save(buf)
     vim.cmd(("MoltenExportOutput! %s %s"):format(vim.fn.fnameescape(file), id))
   end)
   if not ok then return notify("saving outputs failed: " .. tostring(err), vim.log.levels.ERROR) end
+  local py = minimal_diff.python()
+  if py then vim.fn.system({ py, minimal_diff.script_path(), "--normalize-outputs", file }) end
   minimal_diff.snapshot(file)
 end
 
@@ -29,6 +31,8 @@ function M.load(buf)
   pcall(vim.api.nvim_buf_call, buf, function()
     vim.cmd(("MoltenImportOutput %s %s"):format(vim.fn.fnameescape(file), id))
   end)
+  -- redraw the cell headers once molten has the stored outputs
+  require("notebook_cells.ui").watch(buf)
 end
 
 ---Called after every save of a notebook (after the minimal-diff step).

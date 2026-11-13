@@ -159,6 +159,22 @@ local kernel = require("notebook_cells.kernel")
 check("kernel name is a valid kernelspec name", kernel.kernel_name("/a/b c/.venv"):match("^[%w%._%-]+$") ~= nil)
 check("no venv found in empty dir", kernel.find_venv(0) == nil)
 
+-- cell status parsing (reads the text molten draws under a cell)
+do
+  local status = require("notebook_cells.status")
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, { "a", "b", "c", "d" })
+  local mns = vim.api.nvim_create_namespace("molten-extmarks")
+  local function out(row, text) vim.api.nvim_buf_set_extmark(b, mns, row, 0, { virt_lines = { { { text } }, { { "body" } } } }) end
+  out(1, "Out[3]: ✗ Failed 0.1s")
+  out(3, "Out[...]: * On Hold")
+  local rows = status.by_row(b)
+  check("status: failed cell with count", rows[1] and rows[1].state == "failed" and rows[1].count == 3)
+  check("status: waiting cell without count", rows[3] and rows[3].state == "hold" and rows[3].count == nil)
+  check("status: lookup by line range", status.in_range(b, 1, 2, rows) == rows[1])
+  check("status: busy while something waits", status.busy(b))
+end
+
 vim.fn.delete(tmp, "rf")
 if failures > 0 then
   print(failures .. " check(s) failed")

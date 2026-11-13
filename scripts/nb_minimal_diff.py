@@ -3,6 +3,7 @@
 
 usage: nb_minimal_diff.py ORIGINAL.ipynb WRITTEN.ipynb
        nb_minimal_diff.py --clear-outputs NOTEBOOK.ipynb
+       nb_minimal_diff.py --normalize-outputs NOTEBOOK.ipynb
 
 Cells in WRITTEN whose type and source match a cell in ORIGINAL are replaced by
 the original cell object (keeps formatting, ids, outputs, metadata). Changed or
@@ -23,6 +24,11 @@ def norm(cell):
     return cell.get("cell_type"), src.rstrip("\n")
 
 
+def keep_eol(out, orig_text):
+    """Write with the line endings of the original file (no platform translation)."""
+    return out.replace("\n", "\r\n") if "\r\n" in orig_text else out
+
+
 def detect_indent(text):
     for line in text.splitlines()[1:3]:
         n = len(line) - len(line.lstrip(" "))
@@ -32,7 +38,7 @@ def detect_indent(text):
 
 
 def main(orig_path, new_path):
-    orig_text = open(orig_path, encoding="utf-8").read()
+    orig_text = open(orig_path, encoding="utf-8", newline="").read()
     orig = json.loads(orig_text)
     new = json.load(open(new_path, encoding="utf-8"))
 
@@ -70,13 +76,13 @@ def main(orig_path, new_path):
     text = json.dumps(out, indent=detect_indent(orig_text), ensure_ascii=False)
     if orig_text.endswith("\n"):
         text += "\n"
-    with open(new_path, "w", encoding="utf-8") as f:
-        f.write(text)
+    with open(new_path, "w", encoding="utf-8", newline="") as f:
+        f.write(keep_eol(text, orig_text))
 
 
 def clear_outputs(path):
     """Remove every output and execution count, keeping the file's JSON style."""
-    text = open(path, encoding="utf-8").read()
+    text = open(path, encoding="utf-8", newline="").read()
     nb = json.loads(text)
     for c in nb.get("cells", []):
         if c.get("cell_type") == "code":
@@ -85,12 +91,52 @@ def clear_outputs(path):
     out = json.dumps(nb, indent=detect_indent(text), ensure_ascii=False)
     if text.endswith("\n"):
         out += "\n"
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(out)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(keep_eol(out, text))
+
+
+def normalize_outputs(path):
+    """Give molten's exported outputs the types Jupyter would have written.
+
+    Molten stores every plain-text output as display_data. Text that ends with a
+    newline is what print() produces, so it becomes a stdout stream; other plain
+    text is the repr of the cell's last expression, so it becomes execute_result.
+    Anything with other mime types (images, html) and errors is left alone.
+    Stderr output cannot be told apart and is written as stdout.
+    """
+    text = open(path, encoding="utf-8", newline="").read()
+    nb = json.loads(text)
+    for c in nb.get("cells", []):
+        if c.get("cell_type") != "code":
+            continue
+        outs = []
+        for o in c.get("outputs", []):
+            data = o.get("data") or {}
+            if o.get("output_type") == "display_data" and list(data) == ["text/plain"]:
+                body = data["text/plain"]
+                joined = "".join(body) if isinstance(body, list) else body
+                if joined.endswith("\n"):
+                    o = {"name": "stdout", "output_type": "stream", "text": body}
+                else:
+                    o = {
+                        "data": data,
+                        "execution_count": c.get("execution_count"),
+                        "metadata": o.get("metadata", {}),
+                        "output_type": "execute_result",
+                    }
+            outs.append(o)
+        c["outputs"] = outs
+    out = json.dumps(nb, indent=detect_indent(text), ensure_ascii=False)
+    if text.endswith("\n"):
+        out += "\n"
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(keep_eol(out, text))
 
 
 if __name__ == "__main__":
     if sys.argv[1] == "--clear-outputs":
         clear_outputs(sys.argv[2])
+    elif sys.argv[1] == "--normalize-outputs":
+        normalize_outputs(sys.argv[2])
     else:
         main(sys.argv[1], sys.argv[2])

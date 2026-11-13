@@ -14,7 +14,9 @@ end
 local function python()
   local o = config.options.minimal_diff
   if o.python then return o.python end
-  for _, exe in ipairs({ "python3", "python" }) do
+  -- on Windows "python3" is often the Microsoft Store stub, so prefer "python" there
+  local names = vim.fn.has("win32") == 1 and { "python", "py", "python3" } or { "python3", "python" }
+  for _, exe in ipairs(names) do
     if vim.fn.executable(exe) == 1 then return exe end
   end
 end

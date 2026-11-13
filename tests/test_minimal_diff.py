@@ -71,5 +71,42 @@ class ClearOutputs(unittest.TestCase):
         self.assertEqual([c["source"] for c in out["cells"]], [c["source"] for c in notebook["cells"]])
 
 
+class LineEndings(unittest.TestCase):
+    def test_crlf_files_keep_crlf(self):
+        notebook = nb([cell(["a = 1\n"], [{"output_type": "stream", "name": "stdout", "text": ["1\n"]}])])
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d, "n.ipynb")
+            path.write_bytes((json.dumps(notebook, indent=1) + "\n").replace("\n", "\r\n").encode())
+            subprocess.run([sys.executable, str(SCRIPT), "--clear-outputs", str(path)], check=True)
+            data = path.read_bytes()
+        self.assertIn(b"\r\n", data)
+        self.assertNotIn(b"\n", data.replace(b"\r\n", b""))
+
+
+class NormalizeOutputs(unittest.TestCase):
+    def run_normalize(self, outputs, count=3):
+        c = cell(["x\n"], outputs)
+        c["execution_count"] = count
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d, "n.ipynb")
+            path.write_text(json.dumps(nb([c]), indent=1) + "\n")
+            subprocess.run([sys.executable, str(SCRIPT), "--normalize-outputs", str(path)], check=True)
+            return json.loads(path.read_text())["cells"][0]["outputs"]
+
+    def test_text_with_newline_becomes_stream(self):
+        out = self.run_normalize([{"output_type": "display_data", "data": {"text/plain": ["hi\n"]}, "metadata": {}}])
+        self.assertEqual(out, [{"name": "stdout", "output_type": "stream", "text": ["hi\n"]}])
+
+    def test_text_without_newline_becomes_execute_result(self):
+        out = self.run_normalize([{"output_type": "display_data", "data": {"text/plain": ["42"]}, "metadata": {}}])
+        self.assertEqual(out[0]["output_type"], "execute_result")
+        self.assertEqual(out[0]["execution_count"], 3)
+
+    def test_images_and_errors_are_kept(self):
+        image = {"output_type": "display_data", "data": {"text/plain": ["<Figure>"], "image/png": "AAAA"}, "metadata": {}}
+        error = {"output_type": "error", "ename": "E", "evalue": "v", "traceback": []}
+        self.assertEqual(self.run_normalize([image, error]), [image, error])
+
+
 if __name__ == "__main__":
     unittest.main()

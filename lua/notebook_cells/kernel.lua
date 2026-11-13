@@ -82,6 +82,15 @@ function M.kernel_name(venv)
   return ("venv-%s-%s"):format(safe, vim.fn.sha256(venv):sub(1, 6))
 end
 
+---Compare two paths while ignoring separators and, on Windows, letter case.
+local function same_dir(a, b)
+  local function norm(p)
+    p = vim.fs.normalize(vim.fs.dirname(p))
+    return is_win and p:lower() or p
+  end
+  return norm(a) == norm(b)
+end
+
 local PROBE = "import ipykernel; from jupyter_core.paths import jupyter_data_dir as d; print(d())"
 
 ---Make sure a kernelspec for the buffer's venv exists. cb(name) or cb(nil).
@@ -94,7 +103,7 @@ function M.ensure(buf, cb)
   local function register(data_dir)
     local kjson = data_dir .. "/kernels/" .. name .. "/kernel.json"
     local ok, spec = pcall(function() return vim.json.decode(table.concat(vim.fn.readfile(kjson), "\n")) end)
-    if ok and spec and spec.argv and vim.fs.dirname(spec.argv[1]) == vim.fs.dirname(py) then
+    if ok and spec and spec.argv and same_dir(spec.argv[1], py) then
       return cb(name)
     end
     sys({ py, "-m", "ipykernel", "install", "--user", "--name", name, "--display-name", pretty }, function(r)

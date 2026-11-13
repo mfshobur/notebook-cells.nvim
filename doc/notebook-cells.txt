@@ -47,7 +47,7 @@ through `keymaps`.
   <leader>mc    run the cell                     (also <C-CR>)
   <leader>mn    run the cell and go to the next  (also <S-CR>)
   <leader>mO    run the cell, insert one below   (also <A-CR>)
-  <leader>mR    run all cells
+  <leader>mR    run all cells (stops at the first error)
   <leader>mU    run all cells above
   <leader>mB    run this cell and all below
   <leader>mx    interrupt the kernel

@@ -1,5 +1,6 @@
 -- Highlights, cell rendering (extmarks) and window options.
 local cells_mod = require("notebook_cells.cells")
+local status_mod = require("notebook_cells.status")
 local config = require("notebook_cells.config")
 local state = require("notebook_cells.state")
 
@@ -91,6 +92,7 @@ function M.render(buf)
     end
   end
 
+  local rows = status_mod.by_row(buf)
   for idx, c in ipairs(cells) do
     local is_active = idx == act
     local edit = is_active and state.mode[buf] == "edit"
@@ -101,8 +103,24 @@ function M.render(buf)
     local label = "NotebookCells" .. (md and "MarkdownLabel" or "CodeLabel")
     local body = "NotebookCells" .. (md and "MarkdownBody" or "CodeBody")
 
-    -- header: ╭─ [n] Python ──────
-    local title = (" [%d] %s "):format(idx, md and o.labels.markdown or o.labels.code)
+    -- header: ╭─ [3] Python ──────  ([3] is the execution count, [ ] never run, [*] running)
+    local title
+    if md then
+      title = (" %s "):format(o.labels.markdown)
+    else
+      local st = status_mod.in_range(buf, c.s + 1, c.e, rows)
+      local mark = " "
+      if st then
+        if st.state == "hold" or st.state == "running" then
+          mark = "*"
+        elseif st.count then
+          mark = tostring(st.count) .. (st.state == "failed" and " ✗" or "")
+        elseif st.state == "failed" then
+          mark = "✗"
+        end
+      end
+      title = (" [%s] %s "):format(mark, o.labels.code)
+    end
     local used = vim.fn.strdisplaywidth(o.border.top) + vim.fn.strdisplaywidth(title)
     vim.api.nvim_buf_set_extmark(buf, ns, c.s - 1, 0, {
       virt_text = {
@@ -139,6 +157,30 @@ function M.render(buf)
       vim.api.nvim_buf_set_extmark(buf, ns, c.e - 1, 0, { priority = FOOTER_PRIORITY, virt_lines = { footer } })
     end
   end
+end
+
+---Redraw the headers while cells run so execution counts and the running marker
+---stay current. The timer stops itself once nothing is running any more.
+local watching = {}
+function M.watch(buf)
+  if watching[buf] then return end
+  watching[buf] = true
+  local timer = vim.uv.new_timer()
+  local last, idle = nil, 0
+  timer:start(150, 150, vim.schedule_wrap(function()
+    local function stop()
+      watching[buf] = nil
+      if not timer:is_closing() then timer:close() end
+    end
+    if not vim.api.nvim_buf_is_valid(buf) then return stop() end
+    local sig = status_mod.signature(buf)
+    if sig ~= last then
+      last = sig
+      M.render(buf)
+    end
+    if status_mod.busy(buf) then idle = 0 else idle = idle + 1 end
+    if idle > 6 then stop() end
+  end))
 end
 
 -- ── window options (saved on enter, restored on leave) ────────────────────

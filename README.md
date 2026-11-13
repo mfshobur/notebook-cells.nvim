@@ -22,10 +22,10 @@ It builds on two other plugins and does not replace them:
 
 ## What it does
 
-- Draws each cell with a header (`╭─ [1] Python ───`), a bar on the left, a footer and a slightly different background. Markdown cells get another tint and the leading `# ` is hidden. The colors come from your colorscheme.
+- Draws each cell with a header (`╭─ [3] Python ───`), a bar on the left, a footer and a slightly different background. The number in the header is the cell's execution count, like Jupyter: `[ ]` for a cell that was never run, `[*]` while it runs or waits, `[3 ✗]` when it failed. Markdown cells get another tint and the leading `# ` is hidden. The colors come from your colorscheme.
 - Hides the `# ---` YAML block that jupytext puts at the top of the file, and numbers the lines from 1. This needs Neovim 0.11. The block is still saved.
 - Has two modes, like Jupyter. In command mode a cell is selected and the keys act on cells. In edit mode you are inside the cell and Neovim works as usual.
-- Runs cells on a Jupyter kernel through molten-nvim: run the cell, run and advance, run and insert a new cell, run all, run above, run below.
+- Runs cells on a Jupyter kernel through molten-nvim: run the cell, run and advance, run and insert a new cell, run all, run above, run below. Run all, run above and run below stop at the first cell that fails and say which one.
 - Controls the kernel: interrupt, restart, restart and run all, restart and clear outputs, select a different kernel.
 - Clears the output of one cell or of all cells. Clearing all outputs is also written to the file the next time you save, so you can clear before a commit.
 - Edits the structure: add, delete, cut, copy and paste cells, move a cell up or down, merge with the cell below, split at the cursor, change a cell between code and markdown. Moving a cell keeps its output.
@@ -111,7 +111,8 @@ With lazy.nvim:
         -- opens a floating window over the cell.
         vim.g.molten_auto_open_output = false
         vim.g.molten_virt_text_output = true
-        -- For inline plots, use image.nvim and a terminal that supports the kitty graphics protocol:
+        -- For inline plots install ImageMagick, add 3rd/image.nvim (backend = "kitty",
+        -- processor = "magick_cli") and use a terminal with the kitty graphics protocol:
         -- vim.g.molten_image_provider = "image.nvim"
       end,
     },
@@ -225,7 +226,7 @@ You can also call `:NotebookCellsSaveOutputs` and `:NotebookCellsLoadOutputs` by
 
 Clearing is separate from this. After `<leader>mX` the next save removes all outputs from the file, whatever `save_on_write` is set to. If you run cells again before saving and `save_on_write` is on, the new outputs are written.
 
-molten exports `print` output as `display_data` instead of `stream`. That is valid notebook JSON and other tools show it fine, but it is not byte-for-byte what Jupyter writes.
+molten keeps every plain-text output as `display_data`. When the plugin writes outputs it converts them back: text that ends with a newline (what `print` produces) is saved as a `stream`, and other plain text (the value of the last expression) is saved as an `execute_result` with the cell's execution count. Images, HTML and errors are written as molten has them. Output on stderr cannot be told apart from stdout, so it is saved as stdout.
 
 ## How the kernel is chosen
 
@@ -239,8 +240,9 @@ If a kernel is already running for the buffer, that one is used. Pressing the ru
 ## Limitations
 
 - Only jupytext's percent format is supported (`# %%` and `# %% [markdown]`).
-- Run all does not stop at the first error. The kernel refuses to run the cells after a failing one, but molten shows those cells as `Out[...]: ✓ Done` with no output.
-- Execution counts and output boxes come from molten, so they look like molten's (`Out[3]: ✓ Done 0.0s`), not like Jupyter's `[3]` in the margin.
+- The line molten draws at the top of every output (`Out[3]: ✓ Done 0.0s`) comes from molten and cannot be restyled. The execution count in the cell header is the same number.
+- Images in outputs need image.nvim, ImageMagick and a terminal with the kitty graphics protocol, see the setup example. Without them molten cannot show images.
+- Run all waits for each cell to finish before it starts the next one, so cells are not queued on the kernel ahead of time. Interrupt and restart cancel the rest of the run.
 - Undo is Neovim's normal undo. One `u` undoes a whole cell operation such as a paste or a merge.
 - The cells are drawn with extmarks, so there are no buttons or toolbars on them.
 - Kernel detection looks for `venv`-style folders, including ones made by uv. It does not know about poetry or conda environments.
@@ -251,7 +253,7 @@ If a kernel is already running for the buffer, that one is used. Pressing the ru
 
 ```sh
 nvim --headless -u NONE -l tests/smoke.lua   # cell drawing and editing actions
-python3 tests/test_minimal_diff.py           # the save helper
+python3 tests/test_minimal_diff.py           # the save helper (also run on Linux, macOS and Windows in CI)
 ```
 
 ## License

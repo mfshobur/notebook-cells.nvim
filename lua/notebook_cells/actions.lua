@@ -3,6 +3,7 @@ local cells_mod = require("notebook_cells.cells")
 local state = require("notebook_cells.state")
 local ui = require("notebook_cells.ui")
 local kernel = require("notebook_cells.kernel")
+local status = require("notebook_cells.status")
 
 local M = {}
 
@@ -280,7 +281,17 @@ local function code_ranges(buf, pred)
   return list
 end
 
----Evaluate line ranges in order, starting the kernel first when needed.
+---Cancel a sequence started by run_ranges (interrupt and restart call this).
+function M.cancel_run(buf)
+  buf = (buf == nil or buf == 0) and cur_buf() or buf
+  state.run_gen[buf] = (state.run_gen[buf] or 0) + 1
+end
+
+local function is_final(st) return st and (st.state == "done" or st.state == "failed") end
+
+---Evaluate line ranges one after the other and stop at the first cell that fails
+---(like "Run All" in Jupyter). `after` runs once every cell has finished
+---successfully; it is not called when a cell failed or the run was cancelled.
 function M.run_ranges(ranges, after)
   local buf = cur_buf()
   if #ranges == 0 then
@@ -288,13 +299,49 @@ function M.run_ranges(ranges, after)
     return
   end
   kernel.ensure_ready(function()
-    vim.api.nvim_buf_call(buf, function()
-      local id = kernel.attached(buf)[1]
-      for _, r in ipairs(ranges) do
-        vim.fn.MoltenEvaluateRange(id, r[1], r[2])
+    local id = kernel.attached(buf)[1]
+    if not id or not vim.api.nvim_buf_is_valid(buf) then return end
+    M.cancel_run(buf)
+    local gen = state.run_gen[buf]
+    local uv = vim.uv
+    local i = 0
+    local function step()
+      if state.run_gen[buf] ~= gen or not vim.api.nvim_buf_is_valid(buf) then return end
+      i = i + 1
+      local r = ranges[i]
+      if not r then
+        if after then after() end
+        return
       end
-    end)
-    if after then after() end
+      local before = status.in_range(buf, r[1], r[2])
+      before = before and before.header
+      vim.api.nvim_buf_call(buf, function() vim.fn.MoltenEvaluateRange(id, r[1], r[2]) end)
+      ui.watch(buf)
+      if #ranges == 1 then
+        if after then after() end
+        return
+      end
+      local t0 = uv.now()
+      local timer = uv.new_timer()
+      timer:start(100, 100, vim.schedule_wrap(function()
+        local function stop() if not timer:is_closing() then timer:close() end end
+        if state.run_gen[buf] ~= gen or not kernel.is_running(buf) then return stop() end
+        local st = status.in_range(buf, r[1], r[2])
+        -- a fresh result has a different header than the previous run of this cell
+        local fresh = st and (st.header ~= before or uv.now() - t0 > 1500)
+        if is_final(st) and fresh then
+          stop()
+          if st.state == "failed" then
+            local cells = cells_mod.parse(buf)
+            local n = cells_mod.cell_at(cells, r[1]) or i
+            notify(("stopped, cell %d failed"):format(n), vim.log.levels.WARN)
+            return
+          end
+          step()
+        end
+      end))
+    end
+    step()
   end)
 end
 
@@ -337,12 +384,19 @@ function M.run_below()
   M.run_ranges(code_ranges(buf, function(k) return k >= cur end))
 end
 
-function M.interrupt() kernel.interrupt() end
+function M.interrupt()
+  M.cancel_run(cur_buf())
+  kernel.interrupt()
+end
 
 ---Restart the kernel (clear = true also removes all outputs).
-function M.restart(clear) kernel.restart(clear) end
+function M.restart(clear)
+  M.cancel_run(cur_buf())
+  kernel.restart(clear)
+end
 
 function M.restart_and_run_all(clear)
+  M.cancel_run(cur_buf())
   kernel.restart(clear, function() M.run_all() end)
 end
 
